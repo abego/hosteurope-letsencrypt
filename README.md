@@ -2,7 +2,7 @@
 
 Dies ist eine Sammlung kleiner Python 3 Skripte, um die Erstellung und Validierung von
 [Let's Encrypt](https://letsencrypt.org/) SSL Zertifikaten in Verbindung mit Hosteurope 
-WebHosting Paketen so weit als möglich zu automatisieren.
+WebHosting und Wordpress Hosting Paketen so weit als möglich zu automatisieren.
 
 Die Skripte automatisieren folgende Schritte:
 
@@ -13,6 +13,8 @@ die gewünschten Domains zu erstellen oder zu verlängern
 Das abschließende Einbinden des Zertifikats bleibt ein manueller Schritt, da Hosteurope dafür keine API
 bietet, die eine Automatisierung ermöglicht.
 
+Dieses Vorgehen wurde sowohl mit __WebHosting__ Paketen als auch den eingeschränkten __Wordpress Hosting__ Paketen erfolgreich durchgeführt.
+
 
 ## Anforderungen
  
@@ -21,8 +23,8 @@ Für die Nutzung der Skripte wird benötigt:
 - Python 3
 - [certbot](https://certbot.eff.org/)
 
-Die Skripte wurden unter Linux getestet und 
-[das Vorgehen auf meinem Blog beschrieben](https://sebstein.hpfsc.de/2017/09/17/lets-encrypt-mit-hosteurope-webhosting-nutzen/).
+Die Skripte wurden unter Linux sowie dem Windows Subsystem for Linux getestet und 
+[das Vorgehen auf diesem Blog beschrieben](https://sebstein.hpfsc.de/2017/09/17/lets-encrypt-mit-hosteurope-webhosting-nutzen/).
 
 
 ## Konfiguration
@@ -39,8 +41,16 @@ zum Beispiel noch mit den richtigen Parametern experimentiert.
 
     {
       "email": "webmaster@example.com",
-      "staging": false
+      "staging": false,
+      "preferred-challenge": "http"
     }
+
+| Parameter | Bedeutung |
+|---------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
+| email |  E-Mail Adresse für den Let's Encrypt Account. |
+| staging | `true` aktiviert die Verwendung der Let's Encrypt Staging Umgebung. |
+| preferred-challenge |  `http` oder `dns`. Setzt die zu verwendende [Let's Encrypt Challenge](https://letsencrypt.org/docs/challenge-types/ ) auf HTTP oder DNS. |
+
 
 In der Datei __domains.json__ gibt man die Domains an, für die ein Zertifikat erstellt werden soll.
 Neben den Domainamen muss weiterhin der Pfad auf dem FTP Server angegeben werden, damit die Skripte
@@ -65,10 +75,36 @@ um per FTP die entsprechenden Validierungstoken auf dem Webserver zu platzieren.
         "passwort": "GEHEIM"
     }
 
-Das Skript löscht die hochgeladenen Tokens nicht. Die Tokens liegen im jeweiligen Domainpfad auf dem
+Das Skript löscht die hochgeladenen Token nicht. Die Token liegen im jeweiligen Domainpfad auf dem
 Webserver im Unterverzeichnis _.well-known/acme-challenge_.
 
-## Nutzung
+__Achtung__: Wenn Du __Wordpress Hosting__ verwendest ist zusätzliche Konfiguration nötig, damit die Domainvalidierung von __Let's Encrypt__ funktioniert.
+
+### Konfiguration für _Hosteurope Bloghosting_
+
+Um die [Domain zu validieren](https://letsencrypt.org/docs/challenge-types/), fragt __Let's Encrypt__, falls die HTTP-01 Challenge verwendet wird, eine URL ab: `http://<YOUR_DOMAIN>/.well-known/acme-challenge/<TOKEN>`.
+Die Hosteurope Wordpress Hosting Pakete kontrollieren die Dateien in `/`; als Kunde kann man per FTP lediglich Dateien im _Wordpress-Verzeichnis_ `cust_upload/` ablegen.
+
+Wir müssen also sicherstellen, dass die Validierung über `/.well-known/acme-challenge/<TOKEN>` funktioniert, in dem die von diesen Skripten (`validate.py` automatisiert den Tokenupload über FTP) erzeugte Datei geladen wird. Folgendes Vorgehen:
+
+1. Installiere das Wordpress Plugin [__Redirection__](https://redirection.me/).
+1. In den Optionen des Plugins setze __IP-Protokollierung__ auf `keine` oder `Anonymisiert` (#DSGVO).
+1. Damit das Redirection Plugin funktioniert, muss eine Wordpress `.htaccess` vorhanden sein. Diese kannst du automatisch erzeugen lassen, indem Du _Einstellungen > Permalinks_ öffnest und speicherst.
+1. Lege nun eine _Umleitung_ mit folgenden Parametern an:
+
+| Parameter            | Wert                                                                 |
+|----------------------|----------------------------------------------------------------------|
+| URL-Quelle           | `^/\.well-known/acme-challenge/(.*)`                                 |
+| Titel                | `Let's Encrypt Domain Validation`                                    |
+| Passend              | `Nur URL`                                                            |
+| Wenn übereinstimmend | `Umleitung zur URL`                                                  |
+| HTTP-Status Code     | `301 Dauerhaft verschoben`                                           |
+| Ziel-URL             | `http://<YOUR_DOMAIN>/cust_upload/www/.well-known/acme-challenge/$1` |
+
+In der oben genannten Ziel-URL ist der Pfadanteil `www/` enthalten. Dieses Verzeichnis musst Du selbst (z.B. per FTP) innerhalb von `cust_upload/` anlegen. Ausserdem muss dieser Pfad als Mapping in __domains.json__ angegeben werden, damit der Upload des Tokens die Datei wie von _Let's Encrypt_ erwartet erzeugen kann.
+
+
+## Nutzung der Skripte
 
 Ein neues Zertifikat wird erstellt mittels:
 
@@ -78,10 +114,10 @@ Ein bestehendes Zertifikat wird verlängert mittels:
 
     sudo python3 verlaengern.py
     
-Die Skripte müssen mit Root-Rechten laufen, da _certbot_ die generierten Zertifikate unter _/etc/letsencrypt_
-ablegt.
+Wenn die Skripte mit Root-Rechten laufen, legt _certbot_ die generierten Zertifikate unter _/etc/letsencrypt_
+ab. Wird _certbot_ als user aufgerufen, werden die _certbot_ Parameter `--work-dir, --config-dir, --logs-dir` gesetzt und _~/.config/hosteurope-letsencrypt_ als Basis verwendet.
 
-Die folgenden Abschnitte erklären im Detail, was bei jedem Skript genau geschieht.   
+Die folgenden Abschnitte erklären im Detail, was bei jedem Skript geschieht.   
 
 
 ### Zertifikat erstellen (neu.py)
@@ -112,10 +148,10 @@ Dazu wird wiederum mittels __validate.py__ die Domain gegenüber Let's Encrypt v
 Nachdem das Zertifikat verlängert wurde, muss es manuell über das KIS eingebunden werden.
 
 Zertifikate können nur verlängert werden, wenn die zugehörigen Dateien nicht gelöscht wurden.
-_certbot_ legt alle zu einem Zertifikat zugehörigen Dateien unterhalb von 
-_/etc/letsencrypt_ ab. Die Zertifikatsdateien enthalten eine Nummer in ihrem Dateinamen,
-die bei jeder Verlängerung um 1 hochgezählt wird. Das neueste Zertifikat ist immer jenes, mit
-der höchsten Nummer im Dateinamen.
+_certbot_ legt alle zu einem Zertifikat zugehörigen Dateien als root unterhalb von 
+_/etc/letsencrypt_ oder als User unter _~/.config/hosteurope-letsencrypt_ ab.
+Die Zertifikatsdateien enthalten eine Nummer in ihrem Dateinamen, die bei jeder Verlängerung um 1 hochgezählt wird.
+Das neueste Zertifikat ist immer jenes, mit der höchsten Nummer im Dateinamen.
 
 
 ### Zertifikat manuell im KIS einbinden
@@ -137,5 +173,4 @@ hochgeladen werden:
 
 Das Passwort Feld muss leer bleiben!
 
-Nach dem Hochladen startet Hosteurope den Webserver neu und das Zertifikat ist innerhalb weniger Minuten
-online.
+Nach dem Hochladen startet Hosteurope den Webserver neu und das Zertifikat ist innerhalb weniger Minuten online.
